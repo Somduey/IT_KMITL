@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import ChatMain from './components/ChatMain'
 import './App.css'
 
 const courses = [
   { id: 'it', code: 'IT', name: 'เทคโนโลยีสารสนเทศ', color: '#a78bfa' },
-  { id: 'dsba', code: 'DSBA', name: 'วิทยาการข้อมูลและการวิเคราะห์ธุรกิจ', color: '#38bdf8' },
-  { id: 'bit', code: 'BIT', name: 'นวัตกรรมเทคโนโลยีสารสนเทศ', color: '#34d399' },
+  { id: 'dsba', code: 'DSBA', name: 'วิทยาการข้อมูลและการวิเคราะห์เชิงธุรกิจ', color: '#38bdf8' },
+  { id: 'it-inter', code: 'ITI', name: 'เทคโนโลยีสารสนเทศทางธุรกิจ (นานาชาติ)', color: '#34d399' },
   { id: 'ait', code: 'AIT', name: 'ปัญญาประดิษฐ์และเทคโนโลยี', color: '#f59e0b' },
 ]
 
@@ -15,21 +15,44 @@ function App() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const abortControllerRef = useRef(null)
 
-  const sendMessage = (question = input) => {
+  const sendMessage = async (question = input) => {
     const trimmed = question.trim()
     if (!trimmed) return
 
     setMessages((current) => [...current, { role: 'user', text: trimmed }])
     setInput('')
+    setIsLoading(true)
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
 
-    window.setTimeout(() => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: trimmed, courseId: course.id }),
+        signal: abortController.signal,
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.detail || 'ไม่สามารถรับคำตอบได้')
+      setMessages((current) => [...current, { role: 'assistant', text: result.answer, citations: result.citations }])
+    } catch (error) {
+      if (error.name === 'AbortError') return
       setMessages((current) => [...current, {
         role: 'assistant',
-        text: `ขณะนี้ ThaiLLM อยู่ในโหมดตัวอย่างสำหรับหลักสูตร${course.name} คำตอบจริงจะอ้างอิงเฉพาะข้อมูลที่อัปโหลดไว้ในคลังความรู้ของหลักสูตรเท่านั้น`,
+        text: `เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ: ${error.message}`,
       }])
-    }, 450)
+    } finally {
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null
+        setIsLoading(false)
+      }
+    }
   }
+
+  const stopGenerating = () => abortControllerRef.current?.abort()
 
   const resetChat = () => {
     setMessages([])
@@ -62,6 +85,8 @@ function App() {
         onInputChange={setInput}
         onMenuOpen={() => setSidebarOpen(true)}
         onSend={sendMessage}
+        onStop={stopGenerating}
+        isLoading={isLoading}
       />
     </main>
   )
